@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Status da Atualização</title>
+</head>
+<body>
+  <h2>🚀 Acompanhando atualização...</h2>
+  <pre id="log" style="background:#111; color:#0f0; padding:1em;"></pre>
+
+  <script>
+    const logEl = document.getElementById('log');
+    const source = new EventSource('/update-status');
+    source.onmessage = function(event) {
+      logEl.textContent += event.data + '\n';
+    };
+  </script>
+</body>
+</html>
