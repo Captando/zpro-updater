@@ -33,6 +33,7 @@ O sistema funciona como um serviço web que:
 - Sistema Linux (testado no Ubuntu e Debian)
 - Conexão com internet
 - Conta Hotmart com acesso ao produto ZPRO Passaporte
+- ZPRO Instalado em Ubuntu 22.04 ou +
 
 ---
 
