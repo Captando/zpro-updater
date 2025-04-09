@@ -13,15 +13,15 @@ if [ ! -f package.json ]; then
   echo '{"name": "update-script", "version": "1.0.0", "main": "update.js", "license": "MIT"}' > package.json
 fi
 
-# Instala dependências
-npm install express puppeteer dotenv unzip
+# Instala dependências (usando Playwright em vez de Puppeteer e incluindo tesseract.js)
+npm install express playwright dotenv unzip tesseract.js
 
 # Instala PM2 globalmente se não existir
 if ! command -v pm2 &> /dev/null; then
   npm install -g pm2
 fi
 
-# Inicia com PM2 e salva config
+# Inicia com PM2 e salva a configuração
 pm2 start update.js --name update-api
 pm2 save
 eval "$(pm2 startup | grep sudo)"
