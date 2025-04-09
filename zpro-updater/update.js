@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const puppeteer = require('puppeteer');
+const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 const { exec, spawn } = require('child_process');
@@ -33,20 +33,24 @@ function basicAuth(req, res, next) {
 
 async function downloadFile() {
   const downloadPath = path.resolve(__dirname, 'downloads');
-  const fileName = 'zpro_passaporte_shell.zip';
-  const filePath = path.join(downloadPath, fileName);
+  const filePathPattern = /\.zip$/i;
 
+  // Cria a pasta de downloads se não existir e limpa arquivos antigos
   if (!fs.existsSync(downloadPath)) fs.mkdirSync(downloadPath);
-  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  fs.readdirSync(downloadPath).forEach(file => {
+    if (filePathPattern.test(file)) fs.unlinkSync(path.join(downloadPath, file));
+  });
 
-  logUpdate('[1] Abrindo navegador...');
-  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
-  const page = await browser.newPage();
-  const client = await page.target().createCDPSession();
-  await client.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath });
+  logUpdate('[1] Abrindo navegador com Playwright...');
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+  const context = await browser.newContext({
+    acceptDownloads: true,
+    downloadsPath: downloadPath
+  });
+  const page = await context.newPage();
 
   logUpdate('[2] Acessando página de login...');
-  await page.goto('https://zapdasgalaxiaspassaportezdg.club.hotmart.com/lesson', { waitUntil: 'networkidle2' });
+  await page.goto('https://zapdasgalaxiaspassaportezdg.club.hotmart.com/lesson', { waitUntil: 'networkidle' });
   await page.evaluate(() => { document.body.style.zoom = '75%'; });
   await sleep(4000);
   await page.evaluate(() => {
@@ -56,34 +60,43 @@ async function downloadFile() {
 
   logUpdate('[3] Preenchendo login...');
   await page.waitForSelector('form.login-with-password', { timeout: 10000 });
-  await page.type('input[data-test="username"]', process.env.HOTMART_EMAIL);
-  await page.type('input[data-test="password"]', process.env.HOTMART_PASSWORD);
+  await page.fill('input[data-test="username"]', process.env.HOTMART_EMAIL);
+  await page.fill('input[data-test="password"]', process.env.HOTMART_PASSWORD);
   await page.click('button[data-test="submit"]');
 
   logUpdate('[4] Aguardando login...');
   await page.waitForFunction(() => !document.querySelector('form.login-with-password'), { timeout: 30000 });
 
   logUpdate('[5] Acessando página do ZIP...');
-  await page.goto('https://zapdasgalaxiaspassaportezdg.club.hotmart.com/lesson/94JGmMnYeg/z-pro-%252B-instalador-automatico', { waitUntil: 'networkidle2' });
+  await page.goto('https://zapdasgalaxiaspassaportezdg.club.hotmart.com/lesson/94JGmMnYeg/z-pro-%2B-instalador-automatico', { waitUntil: 'networkidle' });
   await page.evaluate(() => { document.body.style.zoom = '75%'; });
-  await sleep(8000);
+  await sleep(10000);
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await sleep(2000);
 
-  logUpdate('[6] Baixando ZIP...');
-  const downloadSelector = 'a.attachment-card[title="zpro_passaporte_shell.zip"]';
-  await page.waitForSelector(downloadSelector, { timeout: 10000 });
-  await page.click(downloadSelector);
+  logUpdate('[6] Procurando especificamente "zpro_passaporte_shell.zip"...');
 
-  for (let i = 0; i < 60; i++) {
-    if (fs.existsSync(filePath)) {
-      logUpdate('[7] ZIP baixado com sucesso!');
-      await browser.close();
-      return filePath;
-    }
-    await sleep(1000);
+  try {
+    await page.waitForSelector('text=zpro_passaporte_shell.zip', { timeout: 40000 });
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 40000 }),
+      page.click('text=zpro_passaporte_shell.zip')
+    ]);
+    const fileName = download.suggestedFilename();
+    const destPath = path.join(downloadPath, fileName);
+    await download.saveAs(destPath);
+    logUpdate(`[7] Download concluído: "${fileName}" salvo com sucesso!`);
+    await browser.close();
+    return destPath;
+  } catch (err) {
+    const screenshotPath = path.join(__dirname, 'debug-page.png');
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    const html = await page.content();
+    fs.writeFileSync('debug-page.html', html);
+    logUpdate('❌ Não encontrei o texto "zpro_passaporte_shell.zip". Conteúdo salvo em debug-page.html e screenshot em debug-page.png');
+    await browser.close();
+    throw new Error('❌ Botão de download não encontrado');
   }
-
-  await browser.close();
-  throw new Error('❌ Timeout ao esperar o ZIP');
 }
 
 async function updateSoftware() {
@@ -112,7 +125,7 @@ async function updateSoftware() {
   await new Promise((resolve, reject) => {
     const proc = spawn('./zpro', [], {
       cwd: path.resolve(__dirname, 'zpro_passaporte_shell'),
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe']
     });
 
     proc.stdout.on('data', data => logUpdate(`[zpro] ${data}`));
@@ -130,7 +143,7 @@ async function updateSoftware() {
     });
   });
 
-  return '✅ Atualização concluída com sucesso.\n\n💡 Se esse sistema te ajudou:\n🤝 Apoie no PIX: pix@captando.com.br';
+  return '✅ Atualização concluída com sucesso.\n\n💡 Se esse sistema te ajudou:\n🤝 Apoie no PIX: pix@captando.com.br\n🟢 Em breve: versão exclusiva para Plataforma Green!';
 }
 
 app.get('/update', basicAuth, async (req, res) => {
@@ -149,7 +162,6 @@ app.get('/update-status', (req, res) => {
   res.setHeader('Connection', 'keep-alive');
 
   let lastLogIndex = 0;
-
   const interval = setInterval(() => {
     if (lastLogIndex < updateLogs.length) {
       for (let i = lastLogIndex; i < updateLogs.length; i++) {
@@ -178,5 +190,6 @@ app.listen(PORT, () => {
   console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
   console.log(`💡 Se esse sistema te ajudou:`);
   console.log(`🤝 Apoie no PIX: pix@captando.com.br`);
+  console.log(`🟢 Em breve: versão exclusiva para Plataforma Green!`);
   console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
 });
